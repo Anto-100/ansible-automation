@@ -1,19 +1,9 @@
 ---
-- name: Create Users on Target Systems
+- name: Create Users on Target Systems (AAP Survey Version)
   hosts: all
   become: yes
   gather_facts: yes
-  vars_prompt:
-    - name: username
-      prompt: "Enter username to create"
-      private: no
-    - name: user_password
-      prompt: "Enter password for the user"
-      private: yes
-    - name: add_sudo
-      prompt: "Add sudo privileges? (yes/no)"
-      private: no
-      default: "no"
+  # NO vars_prompt section!
 
   tasks:
     - name: Ensure required groups exist (Ubuntu)
@@ -25,21 +15,12 @@
         - sudo
       when: ansible_distribution == "Ubuntu"
 
-    - name: Ensure required groups exist (RHEL)
-      group:
-        name: "{{ item }}"
-        state: present
-      loop:
-        - users
-        - wheel
-      when: ansible_os_family == "RedHat"
-
     - name: Create user without sudo
       user:
         name: "{{ username }}"
         password: "{{ user_password | password_hash('sha512') }}"
         groups: users
-        shell: "{{ default_shell }}"
+        shell: "/bin/bash"  # Fixed: was using undefined variable
         create_home: yes
         state: present
       when: add_sudo == "no"
@@ -51,56 +32,11 @@
         groups: 
           - users
           - sudo
-        shell: "{{ default_shell }}"
+        shell: "/bin/bash"  # Fixed: was using undefined variable
         create_home: yes
         state: present
       when: add_sudo == "yes" and ansible_distribution == "Ubuntu"
 
-    - name: Create user with sudo (RHEL)
-      user:
-        name: "{{ username }}"
-        password: "{{ user_password | password_hash('sha512') }}"
-        groups: 
-          - users
-          - wheel
-        shell: "{{ default_shell }}"
-        create_home: yes
-        state: present
-      when: add_sudo == "yes" and ansible_os_family == "RedHat"
-
-    - name: Create predefined custom users
-      user:
-        name: "{{ item.name }}"
-        password: "{{ item.password }}"
-        groups: "{{ item.groups }}"
-        shell: "{{ item.shell }}"
-        create_home: yes
-        state: present
-      loop: "{{ custom_users | default([]) }}"
-      when: custom_users is defined
-
-    - name: Create predefined sudo users
-      user:
-        name: "{{ item.name }}"
-        password: "{{ item.password }}"
-        groups: "{{ item.groups }}"
-        shell: "{{ item.shell }}"
-        create_home: yes
-        state: present
-      loop: "{{ sudo_users | default([]) }}"
-      when: sudo_users is defined
-
-    - name: Set up SSH directory for new users
-      file:
-        path: "/home/{{ item.name }}/.ssh"
-        state: directory
-        owner: "{{ item.name }}"
-        group: "{{ item.name }}"
-        mode: '0700'
-      loop: "{{ custom_users | default([]) + sudo_users | default([]) }}"
-      when: custom_users is defined or sudo_users is defined
-
     - name: Display created users
       debug:
         msg: "User {{ username }} created successfully with sudo: {{ add_sudo }}"
-      when: username is defined
