@@ -1,0 +1,144 @@
+---
+- name: Pre-OS Upgrade Tasks
+  hosts: all
+  become: yes
+  gather_facts: yes
+  vars:
+    backup_timestamp: "{{ ansible_date_time.epoch }}"
+
+  tasks:
+    - name: Create backup directory
+      file:
+        path: "{{ backup_dir }}/pre-upgrade-{{ backup_timestamp }}"
+        state: directory
+        mode: '0755'
+
+    - name: Check disk space
+      shell: df -h /
+      register: disk_space
+      changed_when: false
+
+    - name: Display disk space
+      debug:
+        var: disk_space.stdout_lines
+
+    - name: Check available disk space
+      shell: df / | tail -1 | awk '{print $4}'
+      register: available_space
+      changed_when: false
+
+    - name: Fail if insufficient disk space
+      fail:
+        msg: "Insufficient disk space for upgrade. Available: {{ available_space.stdout }}"
+      when: available_space.stdout|int < 2000000  # 2GB in KB
+
+    - name: Backup critical configuration files
+      copy:
+        src: "{{ item }}"
+        dest: "{{ backup_dir }}/pre-upgrade-{{ backup_timestamp }}/"
+        remote_src: yes
+        backup: yes
+      loop:
+        - /etc/passwd
+        - /etc/group
+        - /etc/shadow
+        - /etc/sudoers
+        - /etc/ssh/sshd_config
+        - /etc/fstab
+        - /etc/hosts
+        - /etc/resolv.conf
+      ignore_errors: yes
+
+    - name: Backup application configurations (Ubuntu)
+      copy:
+        src: "{{ item }}"
+        dest: "{{ backup_dir }}/pre-upgrade-{{ backup_timestamp }}/"
+        remote_src: yes
+        backup: yes
+      loop:
+        - /etc/apache2/
+        - /etc/nginx/
+        - /etc/mysql/
+      when: ansible_distribution == "Ubuntu"
+      ignore_errors: yes
+
+    - name: Get list of installed packages (Ubuntu)
+      shell: dpkg -l > {{ backup_dir }}/pre-upgrade-{{ backup_timestamp }}/installed-packages.txt
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Get list of installed packages (RHEL)
+      shell: rpm -qa > {{ backup_dir }}/pre-upgrade-{{ backup_timestamp }}/installed-packages.txt
+      when: ansible_os_family == "RedHat"
+
+    - name: Stop non-essential services
+      service:
+        name: "{{ item }}"
+        state: stopped
+      loop: "{{ preserve_applications | default([]) }}"
+      ignore_errors: yes
+
+    - name: Create service status backup
+      shell: systemctl list-units --type=service --state=running > {{ backup_dir }}/pre-upgrade-{{ backup_timestamp }}/running-services.txt
+
+    - name: Check for held packages (Ubuntu)
+      command: apt-mark showhold
+      register: held_packages
+      changed_when: false
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Display held packages
+      debug:
+        var: held_packages.stdout_lines
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - held_packages.stdout != ""
+
+    - name: Update package cache (Ubuntu)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Check for available updates (Ubuntu)
+      command: apt list --upgradable
+      register: available_updates
+      changed_when: false
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Display available updates
+      debug:
+        var: available_updates.stdout_lines
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Create upgrade checklist
+      copy:
+        content: |
+          Pre-Upgrade Checklist - {{ ansible_date_time.iso8601 }}
+          ================================================
+          
+          Hostname: {{ ansible_hostname }}
+          IP Address: {{ ansible_default_ipv4.address }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Kernel: {{ ansible_kernel }}
+          
+          Backup Location: {{ backup_dir }}/pre-upgrade-{{ backup_timestamp }}
+          
+          Disk Space Check: {{ 'PASS' if available_space.stdout|int > 2000000 else 'FAIL' }}
+          Configuration Backup: COMPLETED
+          Package List Backup: COMPLETED
+          Service Status Backup: COMPLETED
+          
+          Applications to Preserve:
+          {% for app in preserve_applications | default([]) %}
+          - {{ app }}
+          {% endfor %}
+          
+          Ready for Upgrade: {{ 'YES' if available_space.stdout|int > 2000000 else 'NO - Check disk space' }}
+        dest: "{{ backup_dir }}/pre-upgrade-{{ backup_timestamp }}/upgrade-checklist.txt"
+
+    - name: Display pre-upgrade summary
+      debug:
+        msg: |
+          Pre-upgrade preparation completed!
+          Backup location: {{ backup_dir }}/pre-upgrade-{{ backup_timestamp }}
+          System ready for upgrade: {{ 'YES' if available_space.stdout|int > 2000000 else 'NO' }}

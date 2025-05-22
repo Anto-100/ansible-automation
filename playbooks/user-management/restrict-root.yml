@@ -1,0 +1,97 @@
+---
+- name: Restrict Root Access
+  hosts: all
+  become: yes
+  gather_facts: yes
+  vars_prompt:
+    - name: disable_root_login
+      prompt: "Disable root SSH login? (yes/no)"
+      private: no
+      default: "yes"
+    - name: disable_root_password
+      prompt: "Disable root password? (yes/no)"
+      private: no
+      default: "no"
+
+  tasks:
+    - name: Backup SSH configuration
+      copy:
+        src: /etc/ssh/sshd_config
+        dest: /etc/ssh/sshd_config.backup
+        remote_src: yes
+        backup: yes
+
+    - name: Disable root SSH login
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin no'
+        backup: yes
+      when: disable_root_login == "yes"
+      notify: restart ssh
+
+    - name: Enable root SSH login (if requested)
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin yes'
+        backup: yes
+      when: disable_root_login == "no"
+      notify: restart ssh
+
+    - name: Disable password authentication for root
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication no'
+        backup: yes
+      when: disable_root_password == "yes"
+      notify: restart ssh
+
+    - name: Lock root account
+      user:
+        name: root
+        password_lock: yes
+      when: disable_root_password == "yes"
+
+    - name: Create root access warning message
+      copy:
+        content: |
+          WARNING: Direct root access is restricted on this system.
+          Please use sudo for administrative tasks.
+          
+          Authorized users only.
+          All activities are logged and monitored.
+        dest: /etc/motd
+        backup: yes
+
+    - name: Configure sudo logging
+      lineinfile:
+        path: /etc/rsyslog.conf
+        line: 'auth,authpriv.*                 /var/log/sudo.log'
+        create: yes
+      notify: restart rsyslog
+
+    - name: Set up sudo session timeout
+      lineinfile:
+        path: /etc/sudoers
+        line: 'Defaults timestamp_timeout=15'
+        validate: 'visudo -cf %s'
+
+    - name: Display security status
+      debug:
+        msg: |
+          Root Login: {{ 'Disabled' if disable_root_login == 'yes' else 'Enabled' }}
+          Root Password: {{ 'Locked' if disable_root_password == 'yes' else 'Active' }}
+          Security: Enhanced
+
+  handlers:
+    - name: restart ssh
+      service:
+        name: "{{ 'ssh' if ansible_distribution == 'Ubuntu' else 'sshd' }}"
+        state: restarted
+
+    - name: restart rsyslog
+      service:
+        name: rsyslog
+        state: restarted

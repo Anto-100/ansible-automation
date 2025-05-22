@@ -1,0 +1,10 @@
+---
+- name: Perform OS Upgrade
+  hosts: all
+  become: yes
+  gather_facts: yes
+  vars_prompt:
+    - name: confirm_upgrade
+      prompt: "Are you sure you want to proceed with OS upgrade? (yes/no)"
+      private: no
+      default: "no"

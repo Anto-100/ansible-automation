@@ -1,0 +1,116 @@
+---
+- name: Manage Specific Firewall Rules
+  hosts: all
+  become: yes
+  gather_facts: yes
+  vars_prompt:
+    - name: action
+      prompt: "Action (add/remove/list)"
+      private: no
+      default: "list"
+    - name: port_number
+      prompt: "Port number (if adding/removing)"
+      private: no
+      default: "8080"
+    - name: protocol
+      prompt: "Protocol (tcp/udp)"
+      private: no
+      default: "tcp"
+    - name: rule_action
+      prompt: "Rule action (allow/deny)"
+      private: no
+      default: "allow"
+
+  tasks:
+    - name: Add UFW rule (Ubuntu)
+      ufw:
+        rule: "{{ rule_action }}"
+        port: "{{ port_number }}"
+        proto: "{{ protocol }}"
+        comment: "Custom rule - {{ port_number }}/{{ protocol }}"
+      when: 
+        - action == "add"
+        - ansible_distribution == "Ubuntu"
+
+    - name: Remove UFW rule (Ubuntu)
+      ufw:
+        rule: "{{ rule_action }}"
+        port: "{{ port_number }}"
+        proto: "{{ protocol }}"
+        delete: yes
+      when: 
+        - action == "remove"
+        - ansible_distribution == "Ubuntu"
+
+    - name: Add firewalld rule (RHEL)
+      firewalld:
+        port: "{{ port_number }}/{{ protocol }}"
+        permanent: yes
+        state: enabled
+        immediate: yes
+      when: 
+        - action == "add"
+        - ansible_os_family == "RedHat"
+
+    - name: Remove firewalld rule (RHEL)
+      firewalld:
+        port: "{{ port_number }}/{{ protocol }}"
+        permanent: yes
+        state: disabled
+        immediate: yes
+      when: 
+        - action == "remove"
+        - ansible_os_family == "RedHat"
+
+    - name: List UFW rules (Ubuntu)
+      command: ufw status numbered
+      register: ufw_rules
+      changed_when: false
+      when: 
+        - action == "list"
+        - ansible_distribution == "Ubuntu"
+
+    - name: List firewalld rules (RHEL)
+      command: firewall-cmd --list-all
+      register: firewalld_rules
+      changed_when: false
+      when: 
+        - action == "list"
+        - ansible_os_family == "RedHat"
+
+    - name: Display UFW rules
+      debug:
+        var: ufw_rules.stdout_lines
+      when: 
+        - action == "list"
+        - ansible_distribution == "Ubuntu"
+
+    - name: Display firewalld rules
+      debug:
+        var: firewalld_rules.stdout_lines
+      when: 
+        - action == "list"
+        - ansible_os_family == "RedHat"
+
+    - name: Configure application-specific rules
+      block:
+        - name: Allow Apache/Nginx
+          ufw:
+            rule: allow
+            name: "{{ item }}"
+          loop:
+            - 'Apache'
+            - 'Apache Secure'
+            - 'Nginx HTTP'
+            - 'Nginx HTTPS'
+          when: ansible_distribution == "Ubuntu"
+          ignore_errors: yes
+
+        - name: Allow SSH with rate limiting
+          ufw:
+            rule: limit
+            port: ssh
+            proto: tcp
+          when: ansible_distribution == "Ubuntu"
+
+      when: action == "add"

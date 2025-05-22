@@ -1,0 +1,147 @@
+---
+- name: Manage SELinux Configuration
+  hosts: all
+  become: yes
+  gather_facts: yes
+  vars_prompt:
+    - name: selinux_action
+      prompt: "SELinux action (disable/enable/permissive/status)"
+      private: no
+      default: "status"
+
+  tasks:
+    - name: Check if SELinux is available
+      stat:
+        path: /etc/selinux/config
+      register: selinux_config_file
+
+    - name: Skip SELinux tasks on Ubuntu (SELinux not typically used)
+      debug:
+        msg: "SELinux is not typically used on Ubuntu systems. Skipping SELinux configuration."
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - not selinux_config_file.stat.exists
+
+    - name: Install SELinux tools (RHEL)
+      yum:
+        name:
+          - policycoreutils
+          - policycoreutils-python-utils
+          - selinux-policy
+          - selinux-policy-targeted
+          - libselinux-utils
+          - setroubleshoot-server
+          - setools
+        state: present
+      when: 
+        - ansible_os_family == "RedHat"
+        - selinux_action in ['enable', 'permissive']
+
+    - name: Get current SELinux status
+      command: getenforce
+      register: selinux_current_status
+      changed_when: false
+      when: selinux_config_file.stat.exists
+
+    - name: Display current SELinux status
+      debug:
+        msg: "Current SELinux status: {{ selinux_current_status.stdout }}"
+      when: selinux_config_file.stat.exists
+
+    - name: Backup SELinux config
+      copy:
+        src: /etc/selinux/config
+        dest: /etc/selinux/config.backup
+        remote_src: yes
+        backup: yes
+      when: 
+        - selinux_config_file.stat.exists
+        - selinux_action in ['disable', 'enable', 'permissive']
+
+    - name: Disable SELinux permanently
+      selinux:
+        state: disabled
+      when: 
+        - selinux_action == "disable"
+        - selinux_config_file.stat.exists
+      notify: reboot required
+
+    - name: Enable SELinux in enforcing mode
+      selinux:
+        state: enforcing
+        policy: targeted
+      when: 
+        - selinux_action == "enable"
+        - selinux_config_file.stat.exists
+      notify: reboot required
+
+    - name: Set SELinux to permissive mode
+      selinux:
+        state: permissive
+        policy: targeted
+      when: 
+        - selinux_action == "permissive"
+        - selinux_config_file.stat.exists
+
+    - name: Set SELinux to permissive temporarily
+      command: setenforce 0
+      when: 
+        - selinux_action == "permissive"
+        - selinux_config_file.stat.exists
+        - selinux_current_status.stdout == "Enforcing"
+
+    - name: Install AppArmor (Ubuntu alternative to SELinux)
+      apt:
+        name:
+          - apparmor
+          - apparmor-utils
+        state: present
+        update_cache: yes
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - selinux_action == "enable"
+
+    - name: Enable AppArmor service (Ubuntu)
+      service:
+        name: apparmor
+        state: started
+        enabled: yes
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - selinux_action == "enable"
+
+    - name: Get AppArmor status (Ubuntu)
+      command: aa-status
+      register: apparmor_status
+      changed_when: false
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Display AppArmor status (Ubuntu)
+      debug:
+        var: apparmor_status.stdout_lines
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Create SELinux management script
+      template:
+        src: selinux-manager.sh.j2
+        dest: /usr/local/bin/selinux-manager.sh
+        mode: '0755'
+      when: selinux_config_file.stat.exists
+
+    - name: Final SELinux status check
+      command: getenforce
+      register: final_selinux_status
+      changed_when: false
+      when: selinux_config_file.stat.exists
+
+    - name: Display final status
+      debug:
+        msg: |
+          Action requested: {{ selinux_action }}
+          Final SELinux status: {{ final_selinux_status.stdout if selinux_config_file.stat.exists else 'N/A (Ubuntu)' }}
+          Reboot required: {{ 'Yes' if selinux_action in ['disable', 'enable'] else 'No' }}
+
+  handlers:
+    - name: reboot required
+      debug:
+        msg: "Reboot required for SELinux changes to take effect. Please reboot the system manually."

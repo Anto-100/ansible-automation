@@ -1,0 +1,90 @@
+---
+- name: Manage Sudo Privileges
+  hosts: all
+  become: yes
+  gather_facts: yes
+  vars_prompt:
+    - name: target_user
+      prompt: "Enter username to modify sudo privileges"
+      private: no
+    - name: sudo_action
+      prompt: "Action: add/remove sudo privileges"
+      private: no
+      default: "add"
+
+  tasks:
+    - name: Check if user exists
+      user:
+        name: "{{ target_user }}"
+        state: present
+      check_mode: yes
+      register: user_exists
+      ignore_errors: yes
+
+    - name: Fail if user doesn't exist
+      fail:
+        msg: "User {{ target_user }} does not exist"
+      when: user_exists.failed
+
+    - name: Add user to sudo group (Ubuntu)
+      user:
+        name: "{{ target_user }}"
+        groups: sudo
+        append: yes
+      when: 
+        - sudo_action == "add"
+        - ansible_distribution == "Ubuntu"
+
+    - name: Add user to wheel group (RHEL)
+      user:
+        name: "{{ target_user }}"
+        groups: wheel
+        append: yes
+      when: 
+        - sudo_action == "add"
+        - ansible_os_family == "RedHat"
+
+    - name: Remove user from sudo group (Ubuntu)
+      user:
+        name: "{{ target_user }}"
+        groups: sudo
+        append: no
+      when: 
+        - sudo_action == "remove"
+        - ansible_distribution == "Ubuntu"
+
+    - name: Remove user from wheel group (RHEL)
+      user:
+        name: "{{ target_user }}"
+        groups: wheel
+        append: no
+      when: 
+        - sudo_action == "remove"
+        - ansible_os_family == "RedHat"
+
+    - name: Create custom sudoers file for specific permissions
+      template:
+        src: sudoers.j2
+        dest: "/etc/sudoers.d/{{ target_user }}"
+        mode: '0440'
+        validate: 'visudo -cf %s'
+      when: sudo_action == "custom"
+
+    - name: Remove custom sudoers file
+      file:
+        path: "/etc/sudoers.d/{{ target_user }}"
+        state: absent
+      when: sudo_action == "remove"
+
+    - name: Verify sudo access
+      command: "sudo -l -U {{ target_user }}"
+      register: sudo_check
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Display sudo status
+      debug:
+        msg: |
+          User: {{ target_user }}
+          Action: {{ sudo_action }}
+          Sudo Status: {{ 'Enabled' if sudo_check.rc == 0 else 'Disabled' }}
