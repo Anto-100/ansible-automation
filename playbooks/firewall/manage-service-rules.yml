@@ -1,0 +1,92 @@
+---
+- name: Manage Service-Based Firewall Rules (AAP Survey Version)
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars:
+    service_ports:
+      apache: ["80", "443"]
+      mysql: ["3306"]
+      postgresql: ["5432"]
+      ssh: ["22"]
+      ftp: ["21", "20"]
+      dns: ["53"]
+      smtp: ["25", "587"]
+      imap: ["143", "993"]
+      pop3: ["110", "995"]
+      mongodb: ["27017"]
+      redis: ["6379"]
+      elasticsearch: ["9200", "9300"]
+      docker: ["2376", "2377"]
+      kubernetes: ["6443", "8080"]
+      jenkins: ["8080"]
+      grafana: ["3000"]
+      prometheus: ["9090"]
+
+  tasks:
+    - name: Install UFW (Ubuntu)
+      apt:
+        name: ufw
+        state: present
+        update_cache: yes
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Fail if service not supported
+      fail:
+        msg: "Service '{{ service_name }}' is not supported. Available services: {{ service_ports.keys() | join(', ') }}"
+      when: 
+        - service_name not in service_ports.keys()
+        - service_name != "custom"
+
+    - name: Add service-based firewall rules
+      ufw:
+        rule: "{{ rule_action }}"
+        port: "{{ item }}"
+        proto: "{{ protocol }}"
+        comment: "{{ service_name | upper }} service - {{ item }}/{{ protocol }}"
+      loop: "{{ service_ports[service_name] }}"
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - action == "add"
+        - service_name in service_ports.keys()
+
+    - name: Remove service-based firewall rules
+      ufw:
+        rule: "{{ rule_action }}"
+        port: "{{ item }}"
+        proto: "{{ protocol }}"
+        delete: yes
+      loop: "{{ service_ports[service_name] }}"
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - action == "remove"
+        - service_name in service_ports.keys()
+
+    - name: Add custom service rule
+      ufw:
+        rule: "{{ rule_action }}"
+        port: "{{ custom_port }}"
+        proto: "{{ protocol }}"
+        comment: "Custom service - {{ custom_port }}/{{ protocol }}"
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - action == "add"
+        - service_name == "custom"
+        - custom_port is defined
+
+    - name: Get current firewall status
+      command: ufw status numbered
+      register: service_rules_status
+      changed_when: false
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Display service configuration result
+      debug:
+        msg: |
+          Service: {{ service_name }}
+          Action: {{ action }}
+          Ports configured: {{ service_ports[service_name] | join(', ') if service_name in service_ports.keys() else custom_port }}
+          Protocol: {{ protocol }}
+          Rule Action: {{ rule_action }}
+      when: ansible_distribution == "Ubuntu"

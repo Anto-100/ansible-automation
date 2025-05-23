@@ -1,0 +1,98 @@
+---
+- name: Manage Individual Firewall Rules (AAP Survey Version)
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Install UFW (Ubuntu)
+      apt:
+        name: ufw
+        state: present
+        update_cache: yes
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Add firewall rule with source IP restriction
+      ufw:
+        rule: "{{ rule_action }}"
+        port: "{{ port_number }}"
+        proto: "{{ protocol }}"
+        src: "{{ source_ip }}"
+        comment: "Rule for {{ port_number }}/{{ protocol }} from {{ source_ip }}"
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - action == "add"
+        - source_ip is defined
+        - source_ip != ""
+        - source_ip != "any"
+
+    - name: Add firewall rule without source IP restriction
+      ufw:
+        rule: "{{ rule_action }}"
+        port: "{{ port_number }}"
+        proto: "{{ protocol }}"
+        comment: "Rule for {{ port_number }}/{{ protocol }} from any"
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - action == "add"
+        - (source_ip is not defined or source_ip == "" or source_ip == "any")
+
+    - name: Remove firewall rule with source IP
+      ufw:
+        rule: "{{ rule_action }}"
+        port: "{{ port_number }}"
+        proto: "{{ protocol }}"
+        src: "{{ source_ip }}"
+        delete: yes
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - action == "remove"
+        - source_ip is defined
+        - source_ip != ""
+        - source_ip != "any"
+
+    - name: Remove firewall rule without source IP
+      ufw:
+        rule: "{{ rule_action }}"
+        port: "{{ port_number }}"
+        proto: "{{ protocol }}"
+        delete: yes
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - action == "remove"
+        - (source_ip is not defined or source_ip == "" or source_ip == "any")
+
+    - name: List current firewall rules
+      command: ufw status numbered
+      register: current_rules
+      changed_when: false
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - action == "list"
+
+    - name: Display current firewall rules
+      debug:
+        var: current_rules.stdout_lines
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - action == "list"
+
+    - name: Get updated firewall status after changes
+      command: ufw status numbered
+      register: updated_rules
+      changed_when: false
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - action in ["add", "remove"]
+
+    - name: Display updated firewall rules
+      debug:
+        msg: |
+          Action: {{ action }}
+          Port: {{ port_number }}/{{ protocol }}
+          Source IP: {{ source_ip | default('any') }}
+          Rule Action: {{ rule_action }}
+          Status: {{ 'Completed' if updated_rules.rc == 0 else 'Failed' }}
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - action in ["add", "remove"]
