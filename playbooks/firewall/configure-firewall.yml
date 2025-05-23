@@ -1,5 +1,5 @@
 ---
-- name: Configure Firewall Rules (AAP Survey Version)
+- name: Configure Firewall Rules (AAP Survey Version - Shell Commands)
   hosts: all
   become: yes
   gather_facts: yes
@@ -12,56 +12,81 @@
         update_cache: yes
       when: ansible_distribution == "Ubuntu"
 
+    - name: Check if UFW is installed
+      command: which ufw
+      register: ufw_installed
+      changed_when: false
+      failed_when: false
+      when: ansible_distribution == "Ubuntu"
+
     - name: Reset UFW to defaults (Ubuntu)
-      ufw:
-        state: reset
-      when: ansible_distribution == "Ubuntu"
-
-    - name: Set UFW default policies (Ubuntu)
-      ufw:
-        default: "{{ item.direction }}"
-        policy: "{{ item.policy }}"
-      loop:
-        - { direction: incoming, policy: deny }
-        - { direction: outgoing, policy: allow }
-      when: ansible_distribution == "Ubuntu"
-
-    - name: Add basic firewall rules
-      ufw:
-        rule: allow
-        port: "{{ item }}"
-        proto: tcp
-        comment: "Basic Service"
-      loop:
-        - "22"   # SSH
-        - "80"   # HTTP
-        - "443"  # HTTPS
-      when: ansible_distribution == "Ubuntu"
-
-    - name: Add custom firewall rule
-      ufw:
-        rule: "{{ rule_action }}"
-        port: "{{ custom_port }}"
-        proto: "{{ protocol }}"
-        comment: "Custom Rule - {{ custom_port }}/{{ protocol }}"
+      shell: echo "y" | ufw --force reset
       when: 
         - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
+
+    - name: Set UFW default incoming policy
+      command: ufw --force default deny incoming
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
+
+    - name: Set UFW default outgoing policy
+      command: ufw --force default allow outgoing
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
+
+    - name: Add basic firewall rules (SSH)
+      command: ufw allow 22/tcp comment 'SSH Access'
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
+
+    - name: Add basic firewall rules (HTTP)
+      command: ufw allow 80/tcp comment 'HTTP Access'
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
+
+    - name: Add basic firewall rules (HTTPS)
+      command: ufw allow 443/tcp comment 'HTTPS Access'
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
+
+    - name: Add custom firewall rule
+      command: "ufw allow {{ custom_port }}/{{ protocol }} comment 'Custom Rule - {{ custom_port }}/{{ protocol }}'"
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
         - custom_port is defined
         - custom_port != ""
 
-    - name: Enable UFW (Ubuntu)
-      ufw:
-        state: enabled
-        logging: 'on'
-      when: ansible_distribution == "Ubuntu"
+    - name: Enable UFW
+      command: ufw --force enable
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
 
     - name: Get UFW status
       command: ufw status numbered
       register: ufw_status
       changed_when: false
-      when: ansible_distribution == "Ubuntu"
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
 
     - name: Display firewall status
       debug:
         var: ufw_status.stdout_lines
-      when: ansible_distribution == "Ubuntu"
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
+
+    - name: Display error if UFW not available
+      debug:
+        msg: "UFW is not available on this system"
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc != 0
