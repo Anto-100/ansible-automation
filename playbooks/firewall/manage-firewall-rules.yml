@@ -1,5 +1,5 @@
 ---
-- name: Manage Individual Firewall Rules (AAP Survey Version)
+- name: Manage Individual Firewall Rules (Shell Commands Version)
   hosts: all
   become: yes
   gather_facts: yes
@@ -12,55 +12,50 @@
         update_cache: yes
       when: ansible_distribution == "Ubuntu"
 
+    - name: Check if UFW is installed
+      command: which ufw
+      register: ufw_installed
+      changed_when: false
+      failed_when: false
+      when: ansible_distribution == "Ubuntu"
+
     - name: Add firewall rule with source IP restriction
-      ufw:
-        rule: "{{ rule_action }}"
-        port: "{{ port_number }}"
-        proto: "{{ protocol }}"
-        src: "{{ source_ip }}"
-        comment: "Rule for {{ port_number }}/{{ protocol }} from {{ source_ip }}"
+      command: "ufw allow from {{ source_ip }} to any port {{ port_number }} proto {{ protocol }} comment 'Rule for {{ port_number }}/{{ protocol }} from {{ source_ip }}'"
       when: 
         - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
         - action == "add"
         - source_ip is defined
         - source_ip != ""
         - source_ip != "any"
 
     - name: Add firewall rule without source IP restriction
-      ufw:
-        rule: "{{ rule_action }}"
-        port: "{{ port_number }}"
-        proto: "{{ protocol }}"
-        comment: "Rule for {{ port_number }}/{{ protocol }} from any"
+      command: "ufw allow {{ port_number }}/{{ protocol }} comment 'Rule for {{ port_number }}/{{ protocol }} from any'"
       when: 
         - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
         - action == "add"
         - (source_ip is not defined or source_ip == "" or source_ip == "any")
 
     - name: Remove firewall rule with source IP
-      ufw:
-        rule: "{{ rule_action }}"
-        port: "{{ port_number }}"
-        proto: "{{ protocol }}"
-        src: "{{ source_ip }}"
-        delete: yes
+      command: "ufw delete allow from {{ source_ip }} to any port {{ port_number }} proto {{ protocol }}"
       when: 
         - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
         - action == "remove"
         - source_ip is defined
         - source_ip != ""
         - source_ip != "any"
+      ignore_errors: yes
 
     - name: Remove firewall rule without source IP
-      ufw:
-        rule: "{{ rule_action }}"
-        port: "{{ port_number }}"
-        proto: "{{ protocol }}"
-        delete: yes
+      command: "ufw delete allow {{ port_number }}/{{ protocol }}"
       when: 
         - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
         - action == "remove"
         - (source_ip is not defined or source_ip == "" or source_ip == "any")
+      ignore_errors: yes
 
     - name: List current firewall rules
       command: ufw status numbered
@@ -68,6 +63,7 @@
       changed_when: false
       when: 
         - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
         - action == "list"
 
     - name: Display current firewall rules
@@ -75,6 +71,7 @@
         var: current_rules.stdout_lines
       when: 
         - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
         - action == "list"
 
     - name: Get updated firewall status after changes
@@ -83,6 +80,7 @@
       changed_when: false
       when: 
         - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
         - action in ["add", "remove"]
 
     - name: Display updated firewall rules
@@ -91,8 +89,15 @@
           Action: {{ action }}
           Port: {{ port_number }}/{{ protocol }}
           Source IP: {{ source_ip | default('any') }}
-          Rule Action: {{ rule_action }}
           Status: {{ 'Completed' if updated_rules.rc == 0 else 'Failed' }}
       when: 
         - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
         - action in ["add", "remove"]
+
+    - name: Display error if UFW not available
+      debug:
+        msg: "UFW is not available on this system"
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc != 0

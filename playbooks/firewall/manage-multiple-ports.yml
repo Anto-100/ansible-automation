@@ -1,5 +1,5 @@
 ---
-- name: Manage Multiple Firewall Ports (AAP Survey Version)
+- name: Manage Multiple Firewall Ports (Shell Commands Version)
   hosts: all
   become: yes
   gather_facts: yes
@@ -12,34 +12,44 @@
         update_cache: yes
       when: ansible_distribution == "Ubuntu"
 
+    - name: Check if UFW is installed
+      command: which ufw
+      register: ufw_installed
+      changed_when: false
+      failed_when: false
+      when: ansible_distribution == "Ubuntu"
+
     - name: Convert port list to array
       set_fact:
         port_array: "{{ port_list.split(',') | map('trim') | list }}"
       when: port_list is defined and port_list != ""
 
     - name: Add multiple firewall rules
-      ufw:
-        rule: "{{ rule_action }}"
-        port: "{{ item }}"
-        proto: "{{ protocol }}"
-        comment: "Bulk rule for {{ item }}/{{ protocol }}"
+      command: "ufw allow {{ item }}/{{ protocol }} comment 'Bulk rule for {{ item }}/{{ protocol }}'"
       loop: "{{ port_array }}"
       when: 
         - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
         - action == "add"
         - port_array is defined
 
     - name: Remove multiple firewall rules
-      ufw:
-        rule: "{{ rule_action }}"
-        port: "{{ item }}"
-        proto: "{{ protocol }}"
-        delete: yes
+      command: "ufw delete allow {{ item }}/{{ protocol }}"
       loop: "{{ port_array }}"
       when: 
         - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
         - action == "remove"
         - port_array is defined
+      ignore_errors: yes
+
+    - name: Get final firewall status
+      command: ufw status numbered
+      register: final_status
+      changed_when: false
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
 
     - name: Display processed ports
       debug:
@@ -47,5 +57,14 @@
           Action: {{ action }}
           Ports processed: {{ port_array | join(', ') }}
           Protocol: {{ protocol }}
-          Rule Action: {{ rule_action }}
-      when: port_array is defined
+          Status: Completed
+      when: 
+        - port_array is defined
+        - ufw_installed.rc == 0
+
+    - name: Display final firewall status
+      debug:
+        var: final_status.stdout_lines
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0

@@ -1,5 +1,5 @@
 ---
-- name: Manage Service-Based Firewall Rules (AAP Survey Version)
+- name: Manage Service-Based Firewall Rules (Shell Commands Version)
   hosts: all
   become: yes
   gather_facts: yes
@@ -32,6 +32,13 @@
         update_cache: yes
       when: ansible_distribution == "Ubuntu"
 
+    - name: Check if UFW is installed
+      command: which ufw
+      register: ufw_installed
+      changed_when: false
+      failed_when: false
+      when: ansible_distribution == "Ubuntu"
+
     - name: Fail if service not supported
       fail:
         msg: "Service '{{ service_name }}' is not supported. Available services: {{ service_ports.keys() | join(', ') }}"
@@ -40,46 +47,50 @@
         - service_name != "custom"
 
     - name: Add service-based firewall rules
-      ufw:
-        rule: "{{ rule_action }}"
-        port: "{{ item }}"
-        proto: "{{ protocol }}"
-        comment: "{{ service_name | upper }} service - {{ item }}/{{ protocol }}"
+      command: "ufw allow {{ item }}/{{ protocol }} comment '{{ service_name | upper }} service - {{ item }}/{{ protocol }}'"
       loop: "{{ service_ports[service_name] }}"
       when: 
         - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
         - action == "add"
         - service_name in service_ports.keys()
 
     - name: Remove service-based firewall rules
-      ufw:
-        rule: "{{ rule_action }}"
-        port: "{{ item }}"
-        proto: "{{ protocol }}"
-        delete: yes
+      command: "ufw delete allow {{ item }}/{{ protocol }}"
       loop: "{{ service_ports[service_name] }}"
       when: 
         - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
         - action == "remove"
         - service_name in service_ports.keys()
+      ignore_errors: yes
 
     - name: Add custom service rule
-      ufw:
-        rule: "{{ rule_action }}"
-        port: "{{ custom_port }}"
-        proto: "{{ protocol }}"
-        comment: "Custom service - {{ custom_port }}/{{ protocol }}"
+      command: "ufw allow {{ custom_port }}/{{ protocol }} comment 'Custom service - {{ custom_port }}/{{ protocol }}'"
       when: 
         - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
         - action == "add"
         - service_name == "custom"
         - custom_port is defined
+
+    - name: Remove custom service rule
+      command: "ufw delete allow {{ custom_port }}/{{ protocol }}"
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
+        - action == "remove"
+        - service_name == "custom"
+        - custom_port is defined
+      ignore_errors: yes
 
     - name: Get current firewall status
       command: ufw status numbered
       register: service_rules_status
       changed_when: false
-      when: ansible_distribution == "Ubuntu"
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
 
     - name: Display service configuration result
       debug:
@@ -88,5 +99,14 @@
           Action: {{ action }}
           Ports configured: {{ service_ports[service_name] | join(', ') if service_name in service_ports.keys() else custom_port }}
           Protocol: {{ protocol }}
-          Rule Action: {{ rule_action }}
-      when: ansible_distribution == "Ubuntu"
+          Status: Completed
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
+
+    - name: Display current firewall rules
+      debug:
+        var: service_rules_status.stdout_lines
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - ufw_installed.rc == 0
